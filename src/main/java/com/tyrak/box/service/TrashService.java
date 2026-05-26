@@ -75,13 +75,15 @@ public class TrashService {
         folder.setIsDeleted(false);
         folderRepository.save(folder);
 
+        // Usar el método nativo
         List<File> files = fileRepository.findByFolderAndIsDeletedTrue(folder.getId());
         for (File file : files) {
             file.setIsDeleted(false);
             fileRepository.save(file);
         }
 
-        List<Folder> subFolders = folderRepository.findByParentAndIsDeletedTrue(folder);
+        // Usar el método nativo
+        List<Folder> subFolders = folderRepository.findSubFoldersByParentIdAndDeleted(folder.getId());
         for (Folder subFolder : subFolders) {
             recursivelyRestore(subFolder);
         }

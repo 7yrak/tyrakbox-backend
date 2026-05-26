@@ -11,18 +11,18 @@ import java.util.UUID;
 @Repository
 public interface FileRepository extends JpaRepository<File, UUID> {
 
-    @Query(value = "SELECT * FROM files WHERE user_id = :userId AND folder_id IS NULL AND is_deleted = false", nativeQuery = true)
+    @Query(value = "SELECT * FROM files WHERE user_id = CAST(:userId AS uuid) AND folder_id IS NULL AND is_deleted = false", nativeQuery = true)
     List<File> findRootFilesForUser(@Param("userId") UUID userId);
 
-    @Query(value = "SELECT * FROM files WHERE user_id = :userId AND folder_id = :folderId AND is_deleted = false", nativeQuery = true)
+    @Query(value = "SELECT * FROM files WHERE user_id = CAST(:userId AS uuid) AND folder_id = CAST(:folderId AS uuid) AND is_deleted = false", nativeQuery = true)
     List<File> findFilesByFolderId(@Param("userId") UUID userId, @Param("folderId") UUID folderId);
 
-    @Query(value = "SELECT * FROM files WHERE user_id = :userId AND is_deleted = true", nativeQuery = true)
+    @Query(value = "SELECT * FROM files WHERE user_id = CAST(:userId AS uuid) AND is_deleted = true", nativeQuery = true)
     List<File> findDeletedFilesForUser(@Param("userId") UUID userId);
 
-    @Query(value = "SELECT * FROM files WHERE folder_id = :folderId AND is_deleted = false", nativeQuery = true)
+    @Query(value = "SELECT * FROM files WHERE folder_id = CAST(:folderId AS uuid) AND is_deleted = false", nativeQuery = true)
     List<File> findByFolderAndIsDeletedFalse(@Param("folderId") UUID folderId);
 
-    @Query(value = "SELECT * FROM files WHERE folder_id = :folderId AND is_deleted = true", nativeQuery = true)
+    @Query(value = "SELECT * FROM files WHERE folder_id = CAST(:folderId AS uuid) AND is_deleted = true", nativeQuery = true)
     List<File> findByFolderAndIsDeletedTrue(@Param("folderId") UUID folderId);
 }

@@ -12,18 +12,24 @@ import java.util.UUID;
 @Repository
 public interface FolderRepository extends JpaRepository<Folder, UUID> {
     
-    @Query(value = "SELECT * FROM folders WHERE user_id = :userId AND parent_id IS NULL AND is_deleted = false", nativeQuery = true)
+    @Query(value = "SELECT * FROM folders WHERE user_id = CAST(:userId AS uuid) AND parent_id IS NULL AND is_deleted = false", nativeQuery = true)
     List<Folder> findRootFoldersForUser(@Param("userId") UUID userId);
 
-    @Query(value = "SELECT * FROM folders WHERE user_id = :userId AND parent_id = :parentId AND is_deleted = false", nativeQuery = true)
+    @Query(value = "SELECT * FROM folders WHERE user_id = CAST(:userId AS uuid) AND parent_id = CAST(:parentId AS uuid) AND is_deleted = false", nativeQuery = true)
     List<Folder> findSubFoldersByParentId(@Param("userId") UUID userId, @Param("parentId") UUID parentId);
 
-    @Query(value = "SELECT * FROM folders WHERE user_id = :userId AND is_deleted = true", nativeQuery = true)
+    @Query(value = "SELECT * FROM folders WHERE user_id = CAST(:userId AS uuid) AND is_deleted = true", nativeQuery = true)
     List<Folder> findDeletedFoldersForUser(@Param("userId") UUID userId);
 
-    List<Folder> findByParentAndIsDeletedFalse(Folder parent);
-    List<Folder> findByParentAndIsDeletedTrue(Folder parent);
+    @Query(value = "SELECT * FROM folders WHERE parent_id = CAST(:parentId AS uuid) AND is_deleted = false", nativeQuery = true)
+    List<Folder> findSubFoldersByParentIdAndNotDeleted(@Param("parentId") UUID parentId);
 
-    Optional<Folder> findByNameAndUser_IdAndParent_Id(String name, UUID userId, UUID parentId);
-    Optional<Folder> findByNameAndUser_IdAndParentIsNull(String name, UUID userId);
+    @Query(value = "SELECT * FROM folders WHERE parent_id = CAST(:parentId AS uuid) AND is_deleted = true", nativeQuery = true)
+    List<Folder> findSubFoldersByParentIdAndDeleted(@Param("parentId") UUID parentId);
+
+    @Query(value = "SELECT * FROM folders WHERE name = :name AND user_id = CAST(:userId AS uuid) AND parent_id IS NULL AND is_deleted = false", nativeQuery = true)
+    Optional<Folder> findByNameAndUser_IdAndParentIsNull(@Param("name") String name, @Param("userId") UUID userId);
+    
+    @Query(value = "SELECT * FROM folders WHERE name = :name AND user_id = CAST(:userId AS uuid) AND parent_id = CAST(:parentId AS uuid) AND is_deleted = false", nativeQuery = true)
+    Optional<Folder> findByNameAndUser_IdAndParent_Id(@Param("name") String name, @Param("userId") UUID userId, @Param("parentId") UUID parentId);
 }

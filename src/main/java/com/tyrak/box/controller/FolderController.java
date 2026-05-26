@@ -36,20 +36,17 @@ public class FolderController {
 
     @GetMapping("/content")
     public ResponseEntity<Map<String, Object>> getFolderContent(
-            @RequestParam(required = false) String parentIdStr,
+            @RequestParam(required = false) UUID parentId, // <-- Cambiado a UUID directamente
             Authentication authentication) {
         User user = userRepository.findByUsername(authentication.getName())
                 .orElseThrow(() -> new RuntimeException("Usuario no encontrado"));
 
-        UUID parentId = null;
-        if (parentIdStr != null && !parentIdStr.isEmpty() && !parentIdStr.equals("undefined") && !parentIdStr.equals("null")) {
-             parentId = UUID.fromString(parentIdStr);
-        }
-
         List<Folder> folders;
         List<File> files;
         
+        System.out.println("############################################parentId: "+parentId); // Para depuración
         if (parentId == null) {
+            System.out.println("############################################user.getId(): "+user.getId()); // Para depuración
             folders = folderRepository.findRootFoldersForUser(user.getId());
             files = fileRepository.findRootFilesForUser(user.getId());
         } else {
@@ -61,6 +58,7 @@ public class FolderController {
         response.put("folders", folders);
         response.put("files", files);
 
+        System.out.println("############################################response: "+response); // Para depuración
         return ResponseEntity.ok(response);
     }
 
@@ -76,16 +74,9 @@ public class FolderController {
         String parentIdStr = payload.get("parentId");
         UUID parentId = parentIdStr != null && !parentIdStr.isEmpty() && !parentIdStr.equals("undefined") && !parentIdStr.equals("null") ? UUID.fromString(parentIdStr) : null;
         
-        // La creación de carpetas ahora es manejada por el FileService para consistencia
-        // pero podemos exponer un endpoint para crear carpetas vacías si es necesario.
-        // Por ahora, lo dejamos así para no romper la lógica del frontend.
-        Folder folder = new Folder();
-        folder.setName(name);
-        folder.setUser(user);
-        if (parentId != null) {
-            folder.setParent(folderRepository.findById(parentId).orElse(null));
-        }
-        return ResponseEntity.ok(folderRepository.save(folder));
+        // Usar el método centralizado del FolderService
+        Folder newFolder = folderService.createFolder(name, user, parentId);
+        return ResponseEntity.ok(newFolder);
     }
 
     @DeleteMapping("/{id}")

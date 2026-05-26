@@ -39,7 +39,7 @@ public class FolderService {
             fileRepository.save(file);
         }
 
-        List<Folder> subFolders = folderRepository.findByParentAndIsDeletedFalse(folder);
+        List<Folder> subFolders = folderRepository.findSubFoldersByParentIdAndNotDeleted(folder.getId());
         for (Folder subFolder : subFolders) {
             recursivelyDelete(subFolder);
         }
@@ -53,14 +53,20 @@ public class FolderService {
 
         if (existingFolder.isPresent()) {
             return existingFolder.get();
-        } else {
-            Folder parent = parentId != null ? folderRepository.findById(parentId).orElse(null) : null;
-            Folder newFolder = new Folder();
-            newFolder.setName(name);
-            newFolder.setUser(user);
-            newFolder.setParent(parent);
-            newFolder.setIsDeleted(false);
-            return folderRepository.save(newFolder);
         }
+
+        Folder parent = parentId != null ? folderRepository.findById(parentId).orElse(null) : null;
+        Folder newFolder = new Folder();
+        newFolder.setName(name);
+        newFolder.setUser(user);
+        newFolder.setParent(parent);
+        newFolder.setIsDeleted(false);
+        return folderRepository.save(newFolder);
+    }
+
+    // Nuevo método público para crear carpetas que delega en findOrCreate
+    @Transactional
+    public Folder createFolder(String name, User user, UUID parentId) {
+        return findOrCreate(name, user, parentId);
     }
 }
