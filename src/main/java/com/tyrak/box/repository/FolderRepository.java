@@ -18,15 +18,17 @@ public interface FolderRepository extends JpaRepository<Folder, UUID> {
     @Query(value = "SELECT * FROM folders WHERE user_id = CAST(:userId AS uuid) AND parent_id = CAST(:parentId AS uuid) AND is_deleted = false", nativeQuery = true)
     List<Folder> findSubFoldersByParentId(@Param("userId") UUID userId, @Param("parentId") UUID parentId);
 
-    @Query(value = "SELECT * FROM folders WHERE user_id = CAST(:userId AS uuid) AND is_deleted = true", nativeQuery = true)
-    List<Folder> findDeletedFoldersForUser(@Param("userId") UUID userId);
+    // Corregido: Método de Spring Data JPA para buscar todas las carpetas eliminadas de un usuario.
+    List<Folder> findByUserIdAndIsDeletedTrue(UUID userId);
 
+    // Métodos para borrado/restauración recursiva (ahora nativos)
     @Query(value = "SELECT * FROM folders WHERE parent_id = CAST(:parentId AS uuid) AND is_deleted = false", nativeQuery = true)
     List<Folder> findSubFoldersByParentIdAndNotDeleted(@Param("parentId") UUID parentId);
 
     @Query(value = "SELECT * FROM folders WHERE parent_id = CAST(:parentId AS uuid) AND is_deleted = true", nativeQuery = true)
     List<Folder> findSubFoldersByParentIdAndDeleted(@Param("parentId") UUID parentId);
 
+    // Para creación atómica (ahora nativos)
     @Query(value = "SELECT * FROM folders WHERE name = :name AND user_id = CAST(:userId AS uuid) AND parent_id IS NULL AND is_deleted = false", nativeQuery = true)
     Optional<Folder> findByNameAndUser_IdAndParentIsNull(@Param("name") String name, @Param("userId") UUID userId);
     

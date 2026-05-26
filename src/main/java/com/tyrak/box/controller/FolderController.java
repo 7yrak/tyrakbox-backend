@@ -44,9 +44,7 @@ public class FolderController {
         List<Folder> folders;
         List<File> files;
         
-        System.out.println("############################################parentId: "+parentId); // Para depuración
         if (parentId == null) {
-            System.out.println("############################################user.getId(): "+user.getId()); // Para depuración
             folders = folderRepository.findRootFoldersForUser(user.getId());
             files = fileRepository.findRootFilesForUser(user.getId());
         } else {
@@ -58,7 +56,6 @@ public class FolderController {
         response.put("folders", folders);
         response.put("files", files);
 
-        System.out.println("############################################response: "+response); // Para depuración
         return ResponseEntity.ok(response);
     }
 

@@ -34,7 +34,8 @@ public class TrashService {
     @Transactional(readOnly = true)
     public Map<String, Object> getTrashContent(User user) {
         List<File> files = fileRepository.findDeletedFilesForUser(user.getId());
-        List<Folder> folders = folderRepository.findDeletedFoldersForUser(user.getId());
+        // Corregido: Usar el método de Spring Data JPA
+        List<Folder> folders = folderRepository.findByUserIdAndIsDeletedTrue(user.getId());
 
         Map<String, Object> content = new HashMap<>();
         content.put("files", files);
@@ -45,7 +46,7 @@ public class TrashService {
     @Transactional
     public void emptyTrash(User user) {
         List<File> filesToDelete = fileRepository.findDeletedFilesForUser(user.getId());
-        List<Folder> foldersToDelete = folderRepository.findDeletedFoldersForUser(user.getId());
+        List<Folder> foldersToDelete = folderRepository.findByUserIdAndIsDeletedTrue(user.getId());
 
         for (File file : filesToDelete) {
             try {
@@ -75,14 +76,12 @@ public class TrashService {
         folder.setIsDeleted(false);
         folderRepository.save(folder);
 
-        // Usar el método nativo
         List<File> files = fileRepository.findByFolderAndIsDeletedTrue(folder.getId());
         for (File file : files) {
             file.setIsDeleted(false);
             fileRepository.save(file);
         }
 
-        // Usar el método nativo
         List<Folder> subFolders = folderRepository.findSubFoldersByParentIdAndDeleted(folder.getId());
         for (Folder subFolder : subFolders) {
             recursivelyRestore(subFolder);
