@@ -25,4 +25,13 @@ public interface FileRepository extends JpaRepository<File, UUID> {
 
     @Query(value = "SELECT * FROM files WHERE folder_id = CAST(:folderId AS uuid) AND is_deleted = true", nativeQuery = true)
     List<File> findByFolderAndIsDeletedTrue(@Param("folderId") UUID folderId);
+
+    @Query(value = "SELECT * FROM files WHERE sync_path = :syncPath AND user_id = CAST(:userId AS uuid) ORDER BY updated_at DESC LIMIT 1", nativeQuery = true)
+    java.util.Optional<File> findLatestBySyncPathAndUserId(@Param("syncPath") String syncPath, @Param("userId") UUID userId);
+
+    @Query(value = "SELECT * FROM files WHERE user_id = CAST(:userId AS uuid) AND sync_path IS NOT NULL", nativeQuery = true)
+    List<File> findSyncedFilesForUser(@Param("userId") UUID userId);
+
+    @Query(value = "SELECT * FROM files WHERE sync_path IS NOT NULL", nativeQuery = true)
+    List<File> findAllSyncedFiles();
 }

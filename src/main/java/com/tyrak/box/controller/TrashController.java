@@ -12,7 +12,6 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/trash")
-@CrossOrigin(origins = "http://localhost:4200")
 public class TrashController {
 
     private final TrashService trashService;

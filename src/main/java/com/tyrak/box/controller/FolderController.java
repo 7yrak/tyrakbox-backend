@@ -19,7 +19,6 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/folders")
-@CrossOrigin(origins = "http://localhost:4200")
 public class FolderController {
 
     private final FolderService folderService;

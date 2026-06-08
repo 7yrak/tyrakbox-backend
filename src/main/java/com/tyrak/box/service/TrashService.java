@@ -23,18 +23,24 @@ public class TrashService {
 
     private final FileRepository fileRepository;
     private final FolderRepository folderRepository;
+    private final LocalFolderSyncService localFolderSyncService;
     private final Path rootLocation;
 
-    public TrashService(FileRepository fileRepository, FolderRepository folderRepository, @Value("${storage.location:uploads}") String storageLocation) {
+    public TrashService(
+            FileRepository fileRepository,
+            FolderRepository folderRepository,
+            LocalFolderSyncService localFolderSyncService,
+            @Value("${storage.location:uploads}") String storageLocation
+    ) {
         this.fileRepository = fileRepository;
         this.folderRepository = folderRepository;
+        this.localFolderSyncService = localFolderSyncService;
         this.rootLocation = Paths.get(storageLocation);
     }
 
     @Transactional(readOnly = true)
     public Map<String, Object> getTrashContent(User user) {
         List<File> files = fileRepository.findDeletedFilesForUser(user.getId());
-        // Corregido: Usar el método de Spring Data JPA
         List<Folder> folders = folderRepository.findByUserIdAndIsDeletedTrue(user.getId());
 
         Map<String, Object> content = new HashMap<>();
@@ -51,8 +57,9 @@ public class TrashService {
         for (File file : filesToDelete) {
             try {
                 Files.deleteIfExists(rootLocation.resolve(file.getId().toString()));
+                localFolderSyncService.mirrorDeleteFromApp(file);
             } catch (IOException e) {
-                System.err.println("No se pudo borrar el archivo físico: " + file.getId());
+                System.err.println("No se pudo borrar el archivo fisico: " + file.getId());
             }
         }
 
@@ -66,9 +73,20 @@ public class TrashService {
             fileRepository.findById(id).ifPresent(file -> {
                 file.setIsDeleted(false);
                 fileRepository.save(file);
+                localFolderSyncService.mirrorUploadFromApp(file, readStorageBytes(file));
             });
         } else if ("folder".equals(type)) {
             folderRepository.findById(id).ifPresent(this::recursivelyRestore);
+            folderRepository.findById(id).ifPresent(localFolderSyncService::mirrorFolderFromApp);
+        }
+    }
+
+    private byte[] readStorageBytes(File file) {
+        try {
+            Path filePath = rootLocation.resolve(file.getId().toString());
+            return Files.exists(filePath) ? Files.readAllBytes(filePath) : new byte[0];
+        } catch (IOException e) {
+            return new byte[0];
         }
     }
 
@@ -80,6 +98,7 @@ public class TrashService {
         for (File file : files) {
             file.setIsDeleted(false);
             fileRepository.save(file);
+            localFolderSyncService.mirrorUploadFromApp(file, readStorageBytes(file));
         }
 
         List<Folder> subFolders = folderRepository.findSubFoldersByParentIdAndDeleted(folder.getId());

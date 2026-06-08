@@ -50,6 +50,18 @@ public class File {
     @Column(name = "updated_at")
     private LocalDateTime updatedAt = LocalDateTime.now();
 
+    @Column(name = "sync_path", length = 500)
+    private String syncPath;
+
+    @Column(name = "content_hash", length = 128)
+    private String contentHash;
+
+    @Column(name = "synced_at")
+    private LocalDateTime syncedAt;
+
+    @Column(name = "source_last_modified")
+    private LocalDateTime sourceLastModified;
+
     @PreUpdate
     protected void onUpdate() {
         updatedAt = LocalDateTime.now();

@@ -18,15 +18,20 @@ public class FolderService {
 
     private final FolderRepository folderRepository;
     private final FileRepository fileRepository;
+    private final LocalFolderSyncService localFolderSyncService;
 
-    public FolderService(FolderRepository folderRepository, FileRepository fileRepository) {
+    public FolderService(FolderRepository folderRepository, FileRepository fileRepository, LocalFolderSyncService localFolderSyncService) {
         this.folderRepository = folderRepository;
         this.fileRepository = fileRepository;
+        this.localFolderSyncService = localFolderSyncService;
     }
 
     @Transactional
     public void deleteFolder(UUID folderId) {
-        folderRepository.findById(folderId).ifPresent(this::recursivelyDelete);
+        folderRepository.findById(folderId).ifPresent(folder -> {
+            recursivelyDelete(folder);
+            localFolderSyncService.mirrorDeleteFolderFromApp(folder);
+        });
     }
 
     private void recursivelyDelete(Folder folder) {
@@ -67,6 +72,8 @@ public class FolderService {
     // Nuevo método público para crear carpetas que delega en findOrCreate
     @Transactional
     public Folder createFolder(String name, User user, UUID parentId) {
-        return findOrCreate(name, user, parentId);
+        Folder folder = findOrCreate(name, user, parentId);
+        localFolderSyncService.mirrorFolderFromApp(folder);
+        return folder;
     }
 }
