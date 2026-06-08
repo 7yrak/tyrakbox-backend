@@ -4,6 +4,7 @@ import com.tyrak.box.model.File;
 import com.tyrak.box.model.User;
 import com.tyrak.box.repository.FileRepository;
 import com.tyrak.box.repository.FolderRepository;
+import com.tyrak.box.service.LocalFolderSyncService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -30,6 +31,9 @@ class FileServiceTest {
     @Mock
     private FolderRepository folderRepository;
 
+    @Mock
+    private LocalFolderSyncService localFolderSyncService;
+
     private FileService fileService;
 
     @TempDir
@@ -39,7 +43,7 @@ class FileServiceTest {
 
     @BeforeEach
     void setUp() {
-        fileService = new FileService(fileRepository, folderRepository, tempDir.toString());
+        fileService = new FileService(fileRepository, folderRepository, localFolderSyncService, tempDir.toString());
         
         testUser = new User();
         testUser.setId(UUID.randomUUID());

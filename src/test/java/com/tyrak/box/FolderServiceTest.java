@@ -4,6 +4,7 @@ import com.tyrak.box.model.Folder;
 import com.tyrak.box.model.User;
 import com.tyrak.box.repository.FileRepository;
 import com.tyrak.box.repository.FolderRepository;
+import com.tyrak.box.service.LocalFolderSyncService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -26,6 +27,9 @@ class FolderServiceTest {
 
     @Mock
     private FileRepository fileRepository;
+
+    @Mock
+    private LocalFolderSyncService localFolderSyncService;
 
     @InjectMocks
     private FolderService folderService;
