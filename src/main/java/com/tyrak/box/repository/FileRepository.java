@@ -32,6 +32,9 @@ public interface FileRepository extends JpaRepository<File, UUID> {
     @Query(value = "SELECT * FROM files WHERE user_id = CAST(:userId AS uuid) AND sync_path IS NOT NULL", nativeQuery = true)
     List<File> findSyncedFilesForUser(@Param("userId") UUID userId);
 
-    @Query(value = "SELECT * FROM files WHERE sync_path IS NOT NULL", nativeQuery = true)
-    List<File> findAllSyncedFiles();
+    @Query(value = "SELECT * FROM files WHERE sync_path IS NOT NULL AND user_id = CAST(:userId AS uuid)", nativeQuery = true)
+    List<File> findAllSyncedFilesForUser(@Param("userId") UUID userId);
+
+    @Query(value = "SELECT * FROM files WHERE id = CAST(:fileId AS uuid) AND user_id = CAST(:userId AS uuid)", nativeQuery = true)
+    java.util.Optional<File> findByIdAndUserId(@Param("fileId") UUID fileId, @Param("userId") UUID userId);
 }

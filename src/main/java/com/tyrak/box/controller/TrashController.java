@@ -42,7 +42,10 @@ public class TrashController {
 
     @PostMapping("/restore/{id}")
     public ResponseEntity<?> restoreItem(@PathVariable UUID id, @RequestParam String type, Authentication authentication) {
-        trashService.restoreItem(id, type);
+        User user = userRepository.findByUsername(authentication.getName())
+                .orElseThrow(() -> new RuntimeException("Usuario no encontrado"));
+
+        trashService.restoreItem(id, type, user);
         return ResponseEntity.ok().build();
     }
 }

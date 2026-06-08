@@ -286,11 +286,8 @@ public class LocalFolderSyncService {
     }
 
     private void migrateSyncedFilesToCurrentUser() {
-        for (File file : fileRepository.findAllSyncedFiles()) {
-            file.setUser(syncUser);
-            fileRepository.save(file);
-        }
-        recordEvent("Migración de archivos sincronizados al usuario " + syncUser.getUsername());
+        // No reasignamos archivos existentes a otro usuario para evitar mezclar datos entre cuentas.
+        recordEvent("Sincronización preparada para el usuario " + syncUser.getUsername());
         broadcastStatus();
     }
 

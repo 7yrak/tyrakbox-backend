@@ -68,16 +68,18 @@ public class TrashService {
     }
 
     @Transactional
-    public void restoreItem(UUID id, String type) {
+    public void restoreItem(UUID id, String type, User user) {
         if ("file".equals(type)) {
-            fileRepository.findById(id).ifPresent(file -> {
+            fileRepository.findByIdAndUserId(id, user.getId()).ifPresent(file -> {
                 file.setIsDeleted(false);
                 fileRepository.save(file);
                 localFolderSyncService.mirrorUploadFromApp(file, readStorageBytes(file));
             });
         } else if ("folder".equals(type)) {
-            folderRepository.findById(id).ifPresent(this::recursivelyRestore);
-            folderRepository.findById(id).ifPresent(localFolderSyncService::mirrorFolderFromApp);
+            folderRepository.findByIdAndUserId(id, user.getId()).ifPresent(folder -> {
+                recursivelyRestore(folder, user);
+                localFolderSyncService.mirrorFolderFromApp(folder);
+            });
         }
     }
 
@@ -90,20 +92,24 @@ public class TrashService {
         }
     }
 
-    private void recursivelyRestore(Folder folder) {
+    private void recursivelyRestore(Folder folder, User user) {
         folder.setIsDeleted(false);
         folderRepository.save(folder);
 
-        List<File> files = fileRepository.findByFolderAndIsDeletedTrue(folder.getId());
+        List<File> files = fileRepository.findByFolderAndIsDeletedTrue(folder.getId()).stream()
+                .filter(file -> file.getUser() != null && file.getUser().getId().equals(user.getId()))
+                .toList();
         for (File file : files) {
             file.setIsDeleted(false);
             fileRepository.save(file);
             localFolderSyncService.mirrorUploadFromApp(file, readStorageBytes(file));
         }
 
-        List<Folder> subFolders = folderRepository.findSubFoldersByParentIdAndDeleted(folder.getId());
+        List<Folder> subFolders = folderRepository.findSubFoldersByParentIdAndDeleted(folder.getId()).stream()
+                .filter(subFolder -> subFolder.getUser() != null && subFolder.getUser().getId().equals(user.getId()))
+                .toList();
         for (Folder subFolder : subFolders) {
-            recursivelyRestore(subFolder);
+            recursivelyRestore(subFolder, user);
         }
     }
 }

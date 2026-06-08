@@ -34,4 +34,7 @@ public interface FolderRepository extends JpaRepository<Folder, UUID> {
     
     @Query(value = "SELECT * FROM folders WHERE name = :name AND user_id = CAST(:userId AS uuid) AND parent_id = CAST(:parentId AS uuid) AND is_deleted = false", nativeQuery = true)
     Optional<Folder> findByNameAndUser_IdAndParent_Id(@Param("name") String name, @Param("userId") UUID userId, @Param("parentId") UUID parentId);
+
+    @Query(value = "SELECT * FROM folders WHERE id = CAST(:folderId AS uuid) AND user_id = CAST(:userId AS uuid)", nativeQuery = true)
+    Optional<Folder> findByIdAndUserId(@Param("folderId") UUID folderId, @Param("userId") UUID userId);
 }

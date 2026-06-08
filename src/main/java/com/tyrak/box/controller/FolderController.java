@@ -47,6 +47,8 @@ public class FolderController {
             folders = folderRepository.findRootFoldersForUser(user.getId());
             files = fileRepository.findRootFilesForUser(user.getId());
         } else {
+            folderRepository.findByIdAndUserId(parentId, user.getId())
+                    .orElseThrow(() -> new RuntimeException("Carpeta no encontrada"));
             folders = folderRepository.findSubFoldersByParentId(user.getId(), parentId);
             files = fileRepository.findFilesByFolderId(user.getId(), parentId);
         }
@@ -69,6 +71,11 @@ public class FolderController {
         String name = payload.get("name");
         String parentIdStr = payload.get("parentId");
         UUID parentId = parentIdStr != null && !parentIdStr.isEmpty() && !parentIdStr.equals("undefined") && !parentIdStr.equals("null") ? UUID.fromString(parentIdStr) : null;
+
+        if (parentId != null) {
+            folderRepository.findByIdAndUserId(parentId, user.getId())
+                    .orElseThrow(() -> new RuntimeException("Carpeta no encontrada"));
+        }
         
         // Usar el método centralizado del FolderService
         Folder newFolder = folderService.createFolder(name, user, parentId);
@@ -77,10 +84,11 @@ public class FolderController {
 
     @DeleteMapping("/{id}")
     public ResponseEntity<?> deleteFolder(@PathVariable UUID id, Authentication authentication) {
-        Folder folder = folderRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Carpeta no encontrada"));
         User requestUser = userRepository.findByUsername(authentication.getName())
                 .orElseThrow(() -> new RuntimeException("Usuario no encontrado"));
+
+        Folder folder = folderRepository.findByIdAndUserId(id, requestUser.getId())
+                .orElseThrow(() -> new RuntimeException("Carpeta no encontrada"));
 
         if (!folder.getUser().getId().equals(requestUser.getId())) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build();

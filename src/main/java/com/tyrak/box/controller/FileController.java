@@ -62,15 +62,10 @@ public class FileController {
 
     @GetMapping("/download/{id}")
     public ResponseEntity<Resource> downloadFile(@PathVariable UUID id, Authentication authentication) {
-        File file = fileService.getFileMetadata(id);
-
         User requestUser = userRepository.findByUsername(authentication.getName())
                 .orElseThrow(() -> new RuntimeException("Usuario no encontrado"));
-                
-        if (!file.getUser().getId().equals(requestUser.getId())) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-        }
 
+        File file = fileService.getFileMetadata(id, requestUser);
         Resource resource = fileService.loadFileAsResource(id);
 
         return ResponseEntity.ok()
@@ -81,15 +76,10 @@ public class FileController {
 
     @DeleteMapping("/{id}")
     public ResponseEntity<?> deleteFile(@PathVariable UUID id, Authentication authentication) {
-        File file = fileService.getFileMetadata(id);
         User requestUser = userRepository.findByUsername(authentication.getName())
                 .orElseThrow(() -> new RuntimeException("Usuario no encontrado"));
 
-        if (!file.getUser().getId().equals(requestUser.getId())) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-        }
-
-        fileService.deleteFile(id);
+        fileService.deleteFile(id, requestUser);
         return ResponseEntity.noContent().build();
     }
 }

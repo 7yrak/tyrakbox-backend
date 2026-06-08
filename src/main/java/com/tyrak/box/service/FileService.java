@@ -104,8 +104,8 @@ public class FileService {
     }
 
     @Transactional(readOnly = true)
-    public File getFileMetadata(UUID fileId) {
-        return fileRepository.findById(fileId)
+    public File getFileMetadata(UUID fileId, User user) {
+        return fileRepository.findByIdAndUserId(fileId, user.getId())
                 .orElseThrow(() -> new RuntimeException("Archivo no encontrado en la base de datos"));
     }
 
@@ -124,8 +124,8 @@ public class FileService {
     }
 
     @Transactional
-    public void deleteFile(UUID fileId) {
-        fileRepository.findById(fileId).ifPresent(file -> {
+    public void deleteFile(UUID fileId, User user) {
+        fileRepository.findByIdAndUserId(fileId, user.getId()).ifPresent(file -> {
             file.setIsDeleted(true);
             fileRepository.save(file);
             localFolderSyncService.mirrorDeleteFromApp(file);
