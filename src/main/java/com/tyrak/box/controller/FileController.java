@@ -17,10 +17,14 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @RestController
 @RequestMapping("/api/files")
 public class FileController {
+
+    private static final Logger log = LoggerFactory.getLogger(FileController.class);
 
     private final FileService fileService;
     private final UserRepository userRepository;
@@ -53,9 +57,11 @@ public class FileController {
             
             return ResponseEntity.ok(savedFile);
         } catch (IOException e) {
+            log.error("Error subiendo archivo para user={} folderId={}", authentication.getName(), folderIdStr, e);
             return ResponseEntity.internalServerError()
                     .body("Error al subir el archivo: " + e.getMessage());
         } catch (RuntimeException e) {
+            log.error("Error de validación subiendo archivo para user={} folderId={}", authentication.getName(), folderIdStr, e);
             return ResponseEntity.badRequest().body(e.getMessage());
         }
     }

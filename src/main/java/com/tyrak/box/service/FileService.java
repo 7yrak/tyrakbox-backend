@@ -11,6 +11,8 @@ import org.springframework.core.io.UrlResource;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.net.MalformedURLException;
@@ -24,21 +26,20 @@ import java.util.UUID;
 @Service
 public class FileService {
 
+    private static final Logger log = LoggerFactory.getLogger(FileService.class);
+
     private final FileRepository fileRepository;
     private final FolderRepository folderRepository;
     private final LocalFolderSyncService localFolderSyncService;
     private final Path rootLocation;
-    private final Path chunkLocation;
 
     public FileService(FileRepository fileRepository, FolderRepository folderRepository, LocalFolderSyncService localFolderSyncService, @Value("${storage.location:uploads}") String storageLocation) {
         this.fileRepository = fileRepository;
         this.folderRepository = folderRepository;
         this.localFolderSyncService = localFolderSyncService;
         this.rootLocation = Paths.get(storageLocation);
-        this.chunkLocation = Paths.get(storageLocation, "chunks");
         try {
             Files.createDirectories(rootLocation);
-            Files.createDirectories(chunkLocation);
         } catch (IOException e) {
             throw new RuntimeException("No se pudo inicializar el almacenamiento", e);
         }
@@ -63,6 +64,13 @@ public class FileService {
             targetFolder = currentParent;
         }
 
+        String syncPath = buildSyncPath(fileName, targetFolder);
+        Path destination = resolvePhysicalPath(user.getId(), targetFolder, fileName);
+        java.util.Optional<File> existing = fileRepository.findLatestBySyncPathAndUserId(syncPath, user.getId());
+        if (existing.isPresent() && Boolean.FALSE.equals(existing.get().getIsDeleted()) && Files.exists(destination)) {
+            return existing.get();
+        }
+
         File file = new File();
         file.setName(fileName);
         file.setMimeType(multipartFile.getContentType());
@@ -70,11 +78,16 @@ public class FileService {
         file.setUser(user);
         file.setFolder(targetFolder);
         file.setIsDeleted(false);
-        file.setSyncPath(buildSyncPath(fileName, targetFolder));
+        file.setSyncPath(syncPath);
 
         File savedFile = fileRepository.save(file);
-        Files.copy(multipartFile.getInputStream(), this.rootLocation.resolve(savedFile.getId().toString()));
-        localFolderSyncService.mirrorUploadFromApp(savedFile, multipartFile.getBytes());
+        try {
+            Files.createDirectories(destination.getParent());
+            Files.copy(multipartFile.getInputStream(), destination);
+        } catch (IOException e) {
+            log.error("Error escribiendo archivo físico userId={} fileName={} destination={}", user.getId(), fileName, destination, e);
+            throw e;
+        }
         
         return savedFile;
     }
@@ -97,7 +110,7 @@ public class FileService {
     }
 
     public void saveChunk(MultipartFile chunk, int chunkNumber, String identifier) throws IOException {
-        Path chunkDir = chunkLocation.resolve(identifier);
+        Path chunkDir = rootLocation.resolve("chunks").resolve(identifier);
         Files.createDirectories(chunkDir);
         Path chunkFile = chunkDir.resolve(String.valueOf(chunkNumber));
         Files.write(chunkFile, chunk.getBytes(), StandardOpenOption.CREATE);
@@ -111,7 +124,9 @@ public class FileService {
 
     public Resource loadFileAsResource(UUID fileId) {
         try {
-            Path filePath = this.rootLocation.resolve(fileId.toString()).normalize();
+            File file = fileRepository.findById(fileId)
+                    .orElseThrow(() -> new RuntimeException("Archivo no encontrado"));
+            Path filePath = resolvePhysicalPath(file.getUser().getId(), file.getFolder(), file.getName()).normalize();
             Resource resource = new UrlResource(filePath.toUri());
             if (resource.exists()) {
                 return resource;
@@ -132,6 +147,15 @@ public class FileService {
         });
     }
 
+    private Path resolveUserStoragePath(UUID userId) {
+        return rootLocation.resolve(userId.toString());
+    }
+
+    private Path resolvePhysicalPath(UUID userId, Folder folder, String fileName) {
+        Path userRoot = resolveUserStoragePath(userId);
+        return userRoot.resolve(buildFolderRelativePath(folder)).resolve(fileName);
+    }
+
     private String buildSyncPath(String fileName, Folder folder) {
         String prefix = buildFolderPath(folder);
         return prefix + fileName;
@@ -141,5 +165,19 @@ public class FileService {
         if (folder == null) return "";
         String parent = buildFolderPath(folder.getParent());
         return parent + folder.getName() + "/";
+    }
+
+    private Path buildFolderRelativePath(Folder folder) {
+        if (folder == null) {
+            return Path.of("");
+        }
+
+        java.util.LinkedList<String> segments = new java.util.LinkedList<>();
+        Folder current = folder;
+        while (current != null) {
+            segments.addFirst(current.getName());
+            current = current.getParent();
+        }
+        return Path.of("", segments.toArray(new String[0]));
     }
 }

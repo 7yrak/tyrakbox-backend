@@ -61,7 +61,8 @@ public class LocalFolderSyncService {
     private final UserRepository userRepository;
     private final SyncEventBroadcaster syncEventBroadcaster;
     private final Path storageRoot;
-    private final Path sourceRoot;
+    private final Path sourceBaseRoot;
+    private Path sourceRoot;
     private final ExecutorService executor = Executors.newFixedThreadPool(2);
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
     private final BlockingQueue<Runnable> jobQueue = new LinkedBlockingQueue<>(2000);
@@ -72,6 +73,7 @@ public class LocalFolderSyncService {
     private final AtomicBoolean refreshQueued = new AtomicBoolean(false);
     private final AtomicReference<String> pendingRefreshReason = new AtomicReference<>("refresh");
     private final AtomicReference<ScheduledFuture<?>> pendingRefreshTask = new AtomicReference<>();
+    private final ConcurrentMap<String, FileSnapshot> syncIndex = new ConcurrentHashMap<>();
 
     private WatchService watchService;
     private User syncUser;
@@ -98,7 +100,8 @@ public class LocalFolderSyncService {
         this.userRepository = userRepository;
         this.syncEventBroadcaster = syncEventBroadcaster;
         this.storageRoot = Paths.get(storageLocation);
-        this.sourceRoot = Paths.get(sourceLocation);
+        this.sourceBaseRoot = Paths.get(sourceLocation);
+        this.sourceRoot = this.sourceBaseRoot;
     }
 
     @PostConstruct
@@ -108,16 +111,17 @@ public class LocalFolderSyncService {
         }
 
         try {
+            syncUser = resolveSyncUser();
+            sourceRoot = sourceBaseRoot.resolve(syncUser.getId().toString());
             Files.createDirectories(sourceRoot);
             watchService = sourceRoot.getFileSystem().newWatchService();
-            syncUser = resolveSyncUser();
+            preloadSyncIndex();
             migrateSyncedFilesToCurrentUser();
             registerAll(sourceRoot);
             running.set(true);
             bootstrapExistingFiles();
             executor.submit(this::watchLoop);
             executor.submit(this::jobLoop);
-            scheduler.scheduleWithFixedDelay(this::scanSourceRootSafely, 5, 10, TimeUnit.SECONDS);
             lastEvent = "Sincronización activa";
         } catch (IOException e) {
             throw new RuntimeException("No se pudo iniciar la sincronización local", e);
@@ -146,8 +150,10 @@ public class LocalFolderSyncService {
         status.put("enabled", syncProperties.isEnabled());
         status.put("running", running.get());
         status.put("sourceLocation", sourceRoot.toString());
+        status.put("sourceBaseLocation", sourceBaseRoot.toString());
         status.put("storageLocation", storageRoot.toString());
         status.put("syncUsername", syncProperties.getUsername());
+        status.put("syncUserId", syncUser != null ? syncUser.getId().toString() : null);
         status.put("lastEvent", lastEvent);
         status.put("lastError", lastError);
         status.put("currentTask", currentTask);
@@ -196,19 +202,12 @@ public class LocalFolderSyncService {
     }
 
     public void mirrorUploadFromApp(File file, byte[] content) {
+        // Ya no se duplica el archivo dentro de la carpeta vigilada.
+        // El archivo físico se guarda una sola vez desde FileService.
         if (!syncProperties.isEnabled()) return;
-        try {
-            Path target = sourceRoot.resolve(resolveRelativePath(file));
-            ignorePath(resolveRelativePath(file));
-            Files.createDirectories(target.getParent());
-            Files.write(target, content);
-            lastEvent = "Subido desde la web: " + file.getName();
-            lastError = "";
-            broadcastStatus();
-        } catch (IOException e) {
-            lastError = "No se pudo reflejar subida: " + e.getMessage();
-            broadcastStatus();
-        }
+        lastEvent = "Subida registrada: " + file.getName();
+        lastError = "";
+        broadcastStatus();
     }
 
     public void mirrorFolderFromApp(Folder folder) {
@@ -232,7 +231,6 @@ public class LocalFolderSyncService {
             String relative = resolveRelativePath(file);
             ignorePath(relative);
             Files.deleteIfExists(sourceRoot.resolve(relative));
-            Files.deleteIfExists(storageRoot.resolve(file.getId().toString()));
             lastEvent = "Eliminado desde la web: " + file.getName();
             lastError = "";
             broadcastStatus();
@@ -258,7 +256,7 @@ public class LocalFolderSyncService {
             }
             for (File syncedFile : fileRepository.findSyncedFilesForUser(syncUser.getId())) {
                 if (syncedFile.getSyncPath() != null && syncedFile.getSyncPath().startsWith(resolveFolderRelativePath(folder) + "/")) {
-                    Files.deleteIfExists(storageRoot.resolve(syncedFile.getId().toString()));
+                    Files.deleteIfExists(sourceRoot.resolve(resolveRelativePath(syncedFile)));
                 }
             }
             lastEvent = "Carpeta eliminada desde la web: " + folder.getName();
@@ -358,92 +356,16 @@ public class LocalFolderSyncService {
     private void bootstrapExistingFiles() throws IOException {
         Files.walk(sourceRoot)
                 .filter(Files::isRegularFile)
+                .filter(path -> !isInternalTempPath(path))
                 .forEach(path -> {
                     submitJob(() -> {
                         try {
-                            importFile(path);
+                            importFileIfNeeded(path);
                         } catch (IOException e) {
                             throw new RuntimeException(e);
                         }
                     });
                 });
-    }
-
-    private void scanSourceRootSafely() {
-        if (!running.get()) {
-            return;
-        }
-        try {
-            scanSourceRoot();
-        } catch (Exception e) {
-            lastError = "Error escaneando carpeta sincronizada: " + e.getMessage();
-        }
-    }
-
-    private void scanSourceRoot() throws IOException {
-        if (!Files.exists(sourceRoot)) {
-            return;
-        }
-
-        Map<String, Path> seenPaths = new java.util.HashMap<>();
-        Files.walk(sourceRoot)
-                .filter(Files::isRegularFile)
-                .forEach(path -> seenPaths.put(normalizeSyncPath(path), path));
-
-        for (Map.Entry<String, Path> entry : seenPaths.entrySet()) {
-            String syncPath = entry.getKey();
-            Path path = entry.getValue();
-            if (isIgnored(syncPath)) {
-                continue;
-            }
-
-            Optional<File> existing = fileRepository.findLatestBySyncPathAndUserId(syncPath, syncUser.getId());
-            if (existing.isEmpty()) {
-                submitJob(() -> {
-                    try {
-                        importFile(path);
-                    } catch (IOException e) {
-                        throw new RuntimeException(e);
-                    }
-                });
-                continue;
-            }
-
-            File current = existing.get();
-            long size = Files.size(path);
-            LocalDateTime sourceModified = LocalDateTime.ofInstant(Files.getLastModifiedTime(path).toInstant(), java.time.ZoneId.systemDefault());
-            boolean changed = Boolean.TRUE.equals(current.getIsDeleted())
-                    || current.getSizeBytes() == null
-                    || current.getSizeBytes() != size
-                    || current.getSourceLastModified() == null
-                    || !current.getSourceLastModified().equals(sourceModified);
-            if (changed) {
-                submitJob(() -> {
-                    try {
-                        importFile(path);
-                    } catch (IOException e) {
-                        throw new RuntimeException(e);
-                    }
-                });
-            }
-        }
-
-        for (File syncedFile : fileRepository.findSyncedFilesForUser(syncUser.getId())) {
-            if (syncedFile.getSyncPath() == null || syncedFile.getSyncPath().isBlank()) {
-                continue;
-            }
-            if (!seenPaths.containsKey(syncedFile.getSyncPath()) && Boolean.FALSE.equals(syncedFile.getIsDeleted())) {
-                syncedFile.setIsDeleted(true);
-                syncedFile.setSyncedAt(LocalDateTime.now());
-                fileRepository.save(syncedFile);
-                try {
-                    Files.deleteIfExists(storageRoot.resolve(syncedFile.getId().toString()));
-                } catch (IOException e) {
-                    lastError = "No se pudo borrar la copia interna: " + e.getMessage();
-                }
-                recordEvent("Borrado detectado: " + syncedFile.getSyncPath());
-            }
-        }
     }
 
     private void jobLoop() {
@@ -474,6 +396,9 @@ public class LocalFolderSyncService {
 
     private void handleCreate(Path path) {
         try {
+            if (isInternalTempPath(path)) {
+                return;
+            }
             if (Files.isDirectory(path)) {
                 registerAll(path);
                 recordEvent("Carpeta detectada: " + normalizeSyncPath(path));
@@ -482,7 +407,7 @@ public class LocalFolderSyncService {
                 return;
             }
 
-            importFile(path);
+            importFileIfNeeded(path);
         } catch (IOException e) {
             throw new RuntimeException("Error sincronizando alta: " + path, e);
         }
@@ -490,32 +415,72 @@ public class LocalFolderSyncService {
 
     private void handleModify(Path path) {
         try {
+            if (isInternalTempPath(path)) {
+                return;
+            }
             if (Files.isDirectory(path) || !Files.exists(path)) {
                 return;
             }
-            importFile(path);
+            importFileIfNeeded(path);
         } catch (IOException e) {
             throw new RuntimeException("Error sincronizando cambio: " + path, e);
         }
     }
 
     private void handleDelete(Path path) {
+        if (isInternalTempPath(path)) {
+            return;
+        }
         String syncPath = normalizeSyncPath(path);
         lastEvent = "Borrado detectado: " + syncPath;
         recordEvent("Borrado detectado: " + syncPath);
         broadcastStatus();
-        fileRepository.findLatestBySyncPathAndUserId(syncPath, syncUser.getId())
-                .ifPresent(file -> {
-                    file.setIsDeleted(true);
-                    file.setSyncedAt(LocalDateTime.now());
-                    fileRepository.save(file);
-                    try {
-                        Files.deleteIfExists(storageRoot.resolve(file.getId().toString()));
-                    } catch (IOException e) {
-                        lastError = "No se pudo borrar la copia interna: " + e.getMessage();
-                    }
-                });
+        FileSnapshot snapshot = syncIndex.get(syncPath);
+        if (snapshot != null && !snapshot.deleted) {
+            fileRepository.findLatestBySyncPathAndUserId(syncPath, syncUser.getId())
+                    .ifPresent(file -> {
+                        file.setIsDeleted(true);
+                        file.setSyncedAt(LocalDateTime.now());
+                        fileRepository.save(file);
+                        syncIndex.put(syncPath, FileSnapshot.from(file));
+                    });
+        }
         broadcastRefreshAfterCommit("file-deleted");
+    }
+
+    @Transactional
+    private synchronized void importFileIfNeeded(Path path) throws IOException {
+        if (!Files.exists(path) || Files.isDirectory(path)) {
+            return;
+        }
+
+        String syncPath = normalizeSyncPath(path);
+        long size = Files.size(path);
+        LocalDateTime sourceModified = LocalDateTime.ofInstant(Files.getLastModifiedTime(path).toInstant(), java.time.ZoneId.systemDefault());
+        FileSnapshot snapshot = syncIndex.get(syncPath);
+        if (snapshot != null
+                && !snapshot.deleted
+                && snapshot.sizeBytes != null
+                && snapshot.sizeBytes == size
+                && snapshot.sourceLastModified != null
+                && snapshot.sourceLastModified.equals(sourceModified)) {
+            return;
+        }
+
+        Optional<File> existing = fileRepository.findLatestBySyncPathAndUserId(syncPath, syncUser.getId());
+        if (existing.isPresent()) {
+            File current = existing.get();
+            if (Boolean.FALSE.equals(current.getIsDeleted())
+                    && current.getSizeBytes() != null
+                    && current.getSizeBytes() == size
+                    && current.getSourceLastModified() != null
+                    && current.getSourceLastModified().equals(sourceModified)) {
+                syncIndex.put(syncPath, FileSnapshot.from(current));
+                return;
+            }
+        }
+
+        importFile(path, syncPath, size, sourceModified, existing);
     }
 
     @Transactional
@@ -562,10 +527,8 @@ public class LocalFolderSyncService {
         model.setSyncedAt(LocalDateTime.now());
         model.setSourceLastModified(sourceModified);
 
-        File saved = fileRepository.save(model);
-        Path destination = storageRoot.resolve(saved.getId().toString());
-        Files.createDirectories(destination.getParent());
-        copyWithProgress(path, destination, size);
+        fileRepository.save(model);
+        syncIndex.put(syncPath, FileSnapshot.from(model));
         lastEvent = "Sincronizado: " + syncPath;
         recordEvent("Sincronizado: " + syncPath + " (" + size + " bytes)");
         lastError = "";
@@ -588,6 +551,42 @@ public class LocalFolderSyncService {
                 Thread.currentThread().interrupt();
             }
         });
+    }
+
+    @Transactional
+    private void importFile(Path path, String syncPath, long size, LocalDateTime sourceModified, Optional<File> existing) throws IOException {
+        String fileName = path.getFileName().toString();
+        Folder folder = resolveFolder(path.getParent());
+
+        currentTask = fileName;
+        currentTaskTotalBytes = size;
+        currentTaskBytes = 0L;
+        currentTaskProgress = 0;
+        currentTaskUpdatedAt = System.currentTimeMillis();
+        broadcastStatus();
+
+        File model = existing.orElseGet(File::new);
+        model.setName(fileName);
+        model.setMimeType(Files.probeContentType(path) != null ? Files.probeContentType(path) : "application/octet-stream");
+        model.setSizeBytes(size);
+        model.setUser(syncUser);
+        model.setFolder(folder);
+        model.setIsDeleted(false);
+        model.setSyncPath(syncPath);
+        model.setContentHash(sha256(path));
+        model.setSyncedAt(LocalDateTime.now());
+        model.setSourceLastModified(sourceModified);
+
+        fileRepository.save(model);
+        syncIndex.put(syncPath, FileSnapshot.from(model));
+        lastEvent = "Sincronizado: " + syncPath;
+        recordEvent("Sincronizado: " + syncPath + " (" + size + " bytes)");
+        lastError = "";
+        currentTaskBytes = size;
+        currentTaskProgress = 100;
+        currentTaskUpdatedAt = System.currentTimeMillis();
+        broadcastStatus();
+        broadcastRefreshAfterCommit("file-synced");
     }
 
     private Folder resolveFolder(Path parentPath) {
@@ -624,6 +623,11 @@ public class LocalFolderSyncService {
     private String normalizeSyncPath(Path path) {
         Path relative = sourceRoot.relativize(path);
         return relative.toString().replace("\\", "/");
+    }
+
+    private boolean isInternalTempPath(Path path) {
+        Path relative = sourceRoot.relativize(path);
+        return !relative.toString().isEmpty() && relative.getNameCount() > 0 && "chunks".equals(relative.getName(0).toString());
     }
 
     private String resolveRelativePath(File file) {
@@ -668,6 +672,15 @@ public class LocalFolderSyncService {
         }
     }
 
+    private void preloadSyncIndex() {
+        syncIndex.clear();
+        for (File file : fileRepository.findSyncedFilesForUser(syncUser.getId())) {
+            if (file.getSyncPath() != null && !file.getSyncPath().isBlank()) {
+                syncIndex.put(file.getSyncPath(), FileSnapshot.from(file));
+            }
+        }
+    }
+
     private void recordEvent(String message) {
         lastEvent = message;
         recentEvents.addFirst(message);
@@ -678,23 +691,20 @@ public class LocalFolderSyncService {
         broadcastStatus();
     }
 
-    private void copyWithProgress(Path source, Path destination, long totalBytes) throws IOException {
-        try (InputStream inputStream = Files.newInputStream(source);
-             OutputStream outputStream = Files.newOutputStream(destination, java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.TRUNCATE_EXISTING)) {
-            byte[] buffer = new byte[1024 * 1024];
-            int read;
-            long copied = 0L;
-            while ((read = inputStream.read(buffer)) != -1) {
-                outputStream.write(buffer, 0, read);
-                copied += read;
-                currentTaskBytes = copied;
-                currentTaskProgress = totalBytes > 0 ? (int) Math.min(100, (copied * 100) / totalBytes) : 100;
-                broadcastStatus();
-            }
-            outputStream.flush();
-            currentTaskBytes = totalBytes;
-            currentTaskProgress = 100;
-            broadcastStatus();
+    private static final class FileSnapshot {
+        private final Long sizeBytes;
+        private final LocalDateTime sourceLastModified;
+        private final boolean deleted;
+
+        private FileSnapshot(Long sizeBytes, LocalDateTime sourceLastModified, boolean deleted) {
+            this.sizeBytes = sizeBytes;
+            this.sourceLastModified = sourceLastModified;
+            this.deleted = deleted;
+        }
+
+        private static FileSnapshot from(File file) {
+            return new FileSnapshot(file.getSizeBytes(), file.getSourceLastModified(), Boolean.TRUE.equals(file.getIsDeleted()));
         }
     }
+
 }
