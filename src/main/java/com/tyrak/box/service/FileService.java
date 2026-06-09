@@ -50,17 +50,18 @@ public class FileService {
     }
 
     @Transactional
-    public synchronized File uploadFile(MultipartFile multipartFile, User user, Folder folder) throws IOException {
-        
-        String originalFilename = multipartFile.getOriginalFilename();
-        String fileName = originalFilename;
+    public synchronized File uploadFile(MultipartFile multipartFile, String relativePath, User user, Folder folder) throws IOException {
+        String sourcePath = relativePath != null && !relativePath.isBlank()
+                ? relativePath
+                : multipartFile.getOriginalFilename();
+        String fileName = sourcePath;
         Folder targetFolder = folder;
 
-        if (originalFilename != null && (originalFilename.contains("/") || originalFilename.contains("\\"))) {
-            String normalizedPath = originalFilename.replace("\\", "/");
+        if (sourcePath != null && (sourcePath.contains("/") || sourcePath.contains("\\"))) {
+            String normalizedPath = sourcePath.replace("\\", "/");
             String[] parts = normalizedPath.split("/");
             fileName = parts[parts.length - 1];
-            
+
             Folder currentParent = folder;
             for (int i = 0; i < parts.length - 1; i++) {
                 currentParent = findOrCreateFolder(parts[i], user, currentParent);

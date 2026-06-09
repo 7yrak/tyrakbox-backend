@@ -42,6 +42,7 @@ public class FileController {
     @PostMapping("/upload")
     public ResponseEntity<?> uploadFile(
             @RequestParam("file") MultipartFile file,
+            @RequestParam(value = "relativePath", required = false) String relativePath,
             @RequestParam(value = "folderId", required = false) String folderIdStr,
             Authentication authentication) {
         
@@ -55,7 +56,7 @@ public class FileController {
                 folder = fileService.resolveFolderForUser(folderId, user.getId());
             }
             
-            UploadJobService.UploadJobResult result = uploadJobService.submit(file, user, folder);
+            UploadJobService.UploadJobResult result = uploadJobService.submit(file, relativePath, user, folder);
             return ResponseEntity.accepted().body(result);
         } catch (IOException e) {
             log.error("Error subiendo archivo para user={} folderId={}", authentication.getName(), folderIdStr, e);

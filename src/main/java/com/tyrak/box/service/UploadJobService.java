@@ -20,6 +20,8 @@ import java.util.concurrent.Executors;
 @Service
 public class UploadJobService {
 
+    private static final Path UPLOAD_STAGING_DIR = Path.of(System.getProperty("java.io.tmpdir"), "tyrakbox", "upload-staging");
+
     public static class UploadJobResult {
         private final UUID jobId;
         private final UploadJob.Status status;
@@ -48,20 +50,24 @@ public class UploadJobService {
         this.uploadJobRepository = uploadJobRepository;
     }
 
-    public UploadJobResult submit(MultipartFile multipartFile, User user, Folder folder) throws IOException {
+    public UploadJobResult submit(MultipartFile multipartFile, String relativePath, User user, Folder folder) throws IOException {
         UploadJob job = new UploadJob();
         job.setUser(user);
         job.setFolder(folder);
-        job.setOriginalFilename(multipartFile.getOriginalFilename() != null ? multipartFile.getOriginalFilename() : "archivo");
+        job.setOriginalFilename(relativePath != null && !relativePath.isBlank()
+                ? relativePath
+                : (multipartFile.getOriginalFilename() != null ? multipartFile.getOriginalFilename() : "archivo"));
         job.setStatus(UploadJob.Status.PENDING);
         job.setMessage("En cola");
         job = uploadJobRepository.save(job);
 
-        Path tempFile = Files.createTempFile("tyrak-upload-", ".bin");
+        Files.createDirectories(UPLOAD_STAGING_DIR);
+        Path tempFile = Files.createTempFile(UPLOAD_STAGING_DIR, "tyrak-upload-", ".tmp");
         multipartFile.transferTo(tempFile);
 
         UploadJob savedJob = job;
-        CompletableFuture.runAsync(() -> processJob(savedJob.getId(), tempFile, user, folder), executor);
+        String originalPath = savedJob.getOriginalFilename();
+        CompletableFuture.runAsync(() -> processJob(savedJob.getId(), tempFile, originalPath, user, folder), executor);
         return new UploadJobResult(savedJob.getId(), savedJob.getStatus(), savedJob.getMessage(), null);
     }
 
@@ -79,11 +85,11 @@ public class UploadJobService {
         return uploadJobRepository.findRecentByUserId(userId);
     }
 
-    private void processJob(UUID jobId, Path tempFile, User user, Folder folder) {
+    private void processJob(UUID jobId, Path tempFile, String originalPath, User user, Folder folder) {
         try {
             updateStatus(jobId, UploadJob.Status.PROCESSING, "Procesando", null);
             MultipartFile diskFile = new DiskBackedMultipartFile(tempFile.getFileName().toString(), tempFile);
-            File saved = fileService.uploadFile(diskFile, user, folder);
+            File saved = fileService.uploadFile(diskFile, originalPath, user, folder);
             updateStatus(jobId, UploadJob.Status.COMPLETED, "Completado", saved);
         } catch (Exception e) {
             updateStatus(jobId, UploadJob.Status.FAILED, e.getMessage() != null ? e.getMessage() : "Error inesperado", null);
@@ -103,4 +109,5 @@ public class UploadJobService {
             uploadJobRepository.save(job);
         });
     }
+
 }
