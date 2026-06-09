@@ -57,6 +57,7 @@ public class FileController {
             }
             
             UploadJobService.UploadJobResult result = uploadJobService.submit(file, relativePath, user, folder);
+            log.info("upload accepted user={} jobId={} status={} path={}", user.getUsername(), result.getJobId(), result.getStatus(), relativePath);
             return ResponseEntity.accepted().body(result);
         } catch (IOException e) {
             log.error("Error subiendo archivo para user={} folderId={}", authentication.getName(), folderIdStr, e);
@@ -74,6 +75,7 @@ public class FileController {
                 .orElseThrow(() -> new RuntimeException("Usuario no encontrado"));
 
         UploadJobService.UploadJobResult result = uploadJobService.getJob(jobId);
+        log.info("upload job lookup user={} jobId={} status={}", requestUser.getUsername(), jobId, result.getStatus());
         return ResponseEntity.ok(result);
     }
 

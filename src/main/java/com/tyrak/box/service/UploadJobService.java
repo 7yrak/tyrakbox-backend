@@ -7,6 +7,8 @@ import com.tyrak.box.model.User;
 import com.tyrak.box.repository.UploadJobRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -19,6 +21,7 @@ import java.util.concurrent.Executors;
 
 @Service
 public class UploadJobService {
+    private static final Logger log = LoggerFactory.getLogger(UploadJobService.class);
 
     private static final Path UPLOAD_STAGING_DIR = Path.of(System.getProperty("java.io.tmpdir"), "tyrakbox", "upload-staging");
 
@@ -60,14 +63,20 @@ public class UploadJobService {
         job.setStatus(UploadJob.Status.PENDING);
         job.setMessage("En cola");
         job = uploadJobRepository.save(job);
+        log.info("upload-job submit id={} user={} path={} folder={}", job.getId(), user.getUsername(), job.getOriginalFilename(), folder != null ? folder.getId() : null);
 
         Files.createDirectories(UPLOAD_STAGING_DIR);
         Path tempFile = Files.createTempFile(UPLOAD_STAGING_DIR, "tyrak-upload-", ".tmp");
         multipartFile.transferTo(tempFile);
+        log.info("upload-job staged id={} tempFile={} size={}", job.getId(), tempFile, multipartFile.getSize());
 
         UploadJob savedJob = job;
         String originalPath = savedJob.getOriginalFilename();
-        CompletableFuture.runAsync(() -> processJob(savedJob.getId(), tempFile, originalPath, user, folder), executor);
+        CompletableFuture.runAsync(() -> processJob(savedJob.getId(), tempFile, originalPath, user, folder), executor)
+                .exceptionally(ex -> {
+                    log.error("upload-job async failure id={} path={}", savedJob.getId(), originalPath, ex);
+                    return null;
+                });
         return new UploadJobResult(savedJob.getId(), savedJob.getStatus(), savedJob.getMessage(), null);
     }
 
@@ -87,15 +96,19 @@ public class UploadJobService {
 
     private void processJob(UUID jobId, Path tempFile, String originalPath, User user, Folder folder) {
         try {
+            log.info("upload-job processing start id={} path={} temp={}", jobId, originalPath, tempFile);
             updateStatus(jobId, UploadJob.Status.PROCESSING, "Procesando", null);
             MultipartFile diskFile = new DiskBackedMultipartFile(tempFile.getFileName().toString(), tempFile);
             File saved = fileService.uploadFile(diskFile, originalPath, user, folder);
+            log.info("upload-job processing completed id={} fileId={} path={}", jobId, saved != null ? saved.getId() : null, originalPath);
             updateStatus(jobId, UploadJob.Status.COMPLETED, "Completado", saved);
         } catch (Exception e) {
+            log.error("upload-job processing failed id={} path={}", jobId, originalPath, e);
             updateStatus(jobId, UploadJob.Status.FAILED, e.getMessage() != null ? e.getMessage() : "Error inesperado", null);
         } finally {
             try {
                 Files.deleteIfExists(tempFile);
+                log.info("upload-job staging deleted id={} temp={}", jobId, tempFile);
             } catch (IOException ignored) {
             }
         }
@@ -103,6 +116,7 @@ public class UploadJobService {
 
     private void updateStatus(UUID jobId, UploadJob.Status status, String message, File file) {
         uploadJobRepository.findById(jobId).ifPresent(job -> {
+            log.info("upload-job status id={} status={} message={}", jobId, status, message);
             job.setStatus(status);
             job.setMessage(message);
             job.setFile(file);
