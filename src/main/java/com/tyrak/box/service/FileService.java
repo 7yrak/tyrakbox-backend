@@ -20,7 +20,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
+import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.UUID;
 
 @Service
@@ -32,6 +34,8 @@ public class FileService {
     private final FolderRepository folderRepository;
     private final LocalFolderSyncService localFolderSyncService;
     private final Path rootLocation;
+    private final Map<UUID, Folder> folderByIdCache = new ConcurrentHashMap<>();
+    private final Map<String, Folder> folderPathCache = new ConcurrentHashMap<>();
 
     public FileService(FileRepository fileRepository, FolderRepository folderRepository, LocalFolderSyncService localFolderSyncService, @Value("${storage.location:uploads}") String storageLocation) {
         this.fileRepository = fileRepository;
@@ -94,12 +98,18 @@ public class FileService {
 
     private Folder findOrCreateFolder(String name, User user, Folder parent) {
         UUID parentId = (parent != null) ? parent.getId() : null;
+        String cacheKey = buildFolderCacheKey(user.getId(), parentId, name);
+
+        Folder cached = folderPathCache.get(cacheKey);
+        if (cached != null) {
+            return cached;
+        }
         
         Optional<Folder> existing = (parentId == null)
             ? folderRepository.findByNameAndUser_IdAndParentIsNull(name, user.getId())
             : folderRepository.findByNameAndUser_IdAndParent_Id(name, user.getId(), parentId);
 
-        return existing.orElseGet(() -> {
+        Folder resolved = existing.orElseGet(() -> {
             Folder newFolder = new Folder();
             newFolder.setName(name);
             newFolder.setUser(user);
@@ -107,6 +117,26 @@ public class FileService {
             newFolder.setIsDeleted(false);
             return folderRepository.save(newFolder);
         });
+
+        folderPathCache.put(cacheKey, resolved);
+        folderByIdCache.put(resolved.getId(), resolved);
+        return resolved;
+    }
+
+    public Folder resolveFolderForUser(UUID folderId, UUID userId) {
+        if (folderId == null) {
+            return null;
+        }
+
+        Folder cached = folderByIdCache.get(folderId);
+        if (cached != null && cached.getUser() != null && userId.equals(cached.getUser().getId())) {
+            return cached;
+        }
+
+        Folder resolved = folderRepository.findByIdAndUserId(folderId, userId)
+                .orElseThrow(() -> new RuntimeException("Carpeta no encontrada"));
+        folderByIdCache.put(folderId, resolved);
+        return resolved;
     }
 
     public void saveChunk(MultipartFile chunk, int chunkNumber, String identifier) throws IOException {
@@ -179,5 +209,9 @@ public class FileService {
             current = current.getParent();
         }
         return Path.of("", segments.toArray(new String[0]));
+    }
+
+    private String buildFolderCacheKey(UUID userId, UUID parentId, String name) {
+        return userId + ":" + (parentId != null ? parentId : "root") + ":" + name;
     }
 }
