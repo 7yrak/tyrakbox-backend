@@ -1,10 +1,11 @@
-package com.tyrak.box.service;
+package com.tyrak.box;
 
 import com.tyrak.box.model.File;
 import com.tyrak.box.model.User;
 import com.tyrak.box.repository.FileRepository;
 import com.tyrak.box.repository.FolderRepository;
 import com.tyrak.box.service.LocalFolderSyncService;
+import com.tyrak.box.service.FileService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -61,7 +62,7 @@ class FileServiceTest {
             return f;
         });
 
-        File result = fileService.uploadFile(mockFile, testUser, null);
+        File result = fileService.uploadFile(mockFile, "test.txt", testUser, null);
 
         assertNotNull(result.getId());
         assertEquals("test.txt", result.getName());
