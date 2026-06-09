@@ -6,6 +6,7 @@ import com.tyrak.box.model.UploadJob;
 import com.tyrak.box.model.User;
 import com.tyrak.box.repository.UploadJobRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.multipart.MultipartFile;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,8 +23,6 @@ import java.util.concurrent.Executors;
 @Service
 public class UploadJobService {
     private static final Logger log = LoggerFactory.getLogger(UploadJobService.class);
-
-    private static final Path UPLOAD_STAGING_DIR = Path.of(System.getProperty("java.io.tmpdir"), "tyrakbox", "upload-staging");
 
     public static class UploadJobResult {
         private final UUID jobId;
@@ -47,10 +46,15 @@ public class UploadJobService {
     private final ExecutorService executor = Executors.newFixedThreadPool(4);
     private final FileService fileService;
     private final UploadJobRepository uploadJobRepository;
+    private final Path uploadStagingDir;
 
-    public UploadJobService(FileService fileService, UploadJobRepository uploadJobRepository) {
+    public UploadJobService(
+            FileService fileService,
+            UploadJobRepository uploadJobRepository,
+            @Value("${upload.staging-location:${storage.location}/.upload-staging}") String uploadStagingLocation) {
         this.fileService = fileService;
         this.uploadJobRepository = uploadJobRepository;
+        this.uploadStagingDir = Path.of(uploadStagingLocation);
     }
 
     public UploadJobResult submit(MultipartFile multipartFile, String relativePath, User user, Folder folder) throws IOException {
@@ -65,8 +69,8 @@ public class UploadJobService {
         job = uploadJobRepository.save(job);
         log.info("upload-job submit id={} user={} path={} folder={}", job.getId(), user.getUsername(), job.getOriginalFilename(), folder != null ? folder.getId() : null);
 
-        Files.createDirectories(UPLOAD_STAGING_DIR);
-        Path tempFile = Files.createTempFile(UPLOAD_STAGING_DIR, "tyrak-upload-", ".tmp");
+        Files.createDirectories(uploadStagingDir);
+        Path tempFile = Files.createTempFile(uploadStagingDir, "tyrak-upload-", ".tmp");
         multipartFile.transferTo(tempFile);
         log.info("upload-job staged id={} tempFile={} size={}", job.getId(), tempFile, multipartFile.getSize());
 
